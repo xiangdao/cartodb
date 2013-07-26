@@ -1,0 +1,8 @@
+SET
+CREATE TABLE
+
+public|t|the_geom|2|4326|GEOMETRY
+public|t|the_geom_webmercator|2|3857|GEOMETRY
+INSERT 0 1
+t1|1|0|0|1|2|111319|222684
+DROP TABLE
