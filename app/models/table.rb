@@ -1613,6 +1613,7 @@ SQL
       owner.in_database.rename_table(@name_changed_from, name)
       propagate_name_change_to_table_visualization
 
+
       CartoDB::notify_exception(
         CartoDB::GenericImportError.new("Attempt to rename table without layers #{self.name}"), 
         user: owner

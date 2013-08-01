@@ -92,6 +92,7 @@ module CartoDB
 
       def name=(name)
         self.name_changed = true if name != @name && !@name.nil?
+        @old_name = @name
         super(name)
       end #name=
 
@@ -160,8 +161,8 @@ module CartoDB
 
       def propagate_privacy_and_name_to(table)
         return self unless table
-        propagate_privacy_to(table) if privacy_changed
         propagate_name_to(table)    if name_changed
+        propagate_privacy_to(table) if privacy_changed
       end #propagate_privacy_and_name_to
 
       def propagate_privacy_to(table)
@@ -172,9 +173,17 @@ module CartoDB
       end #propagate_privacy_to
 
       def propagate_name_to(table)
-        table.name = self.name
-        table.update(name: self.name)
-        table.send(:update_name_changes)
+        begin
+          table.name = self.name
+          table.update(name: self.name)
+          table.send(:update_name_changes)
+        rescue Sequel::DatabaseError => e
+          errors[:name => 'is an invalid name']
+          self.name=@old_name
+          repository.store(id, attributes.to_hash)
+          raise CartoDB::InvalidMember
+          return self
+        end
         self
       end #propagate_name_to
 

@@ -103,8 +103,29 @@ describe Table do
       table.table_visualization.name  .should == table.name
     end
 
-    it 'receives a name change if table visualization name changed' do
-      table = create_table(name: 'bogus_name', user_id: @user.id)
+    it 'works with leading underscores', now: true do
+      table = Table.new
+      table.name = 'my_untitled_table'
+      table.user_id = @user.id
+      table.save.reload
+      table.name.should == "my_untitled_table"
+
+      begin
+        table.table_visualization.name = "_my_untitled_table"
+        table.table_visualization.store
+      rescue => exception
+        puts exception
+        puts exception.backtrace
+      end
+        table.reload
+        puts table.name
+        puts table.table_visualization.name
+    end
+
+    it 'receives a name change if table visualization name changed', now: true do
+      table = create_table(name: 'bogus_name_1', user_id: @user.id)
+      puts table.records.first
+
       table.table_visualization.name.should == table.name
 
       table.table_visualization.name = 'bogus_name_2'
@@ -476,7 +497,6 @@ describe Table do
     end
 
     it 'raises QuotaExceeded when trying to create a table while over quota' do
-      pending "Deactivated until table creation paths are unified - Issue 2974"
       quota_in_bytes  = 524288000
       table_quota     = 5
       new_user        = new_user
