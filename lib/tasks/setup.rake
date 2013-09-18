@@ -29,11 +29,23 @@ DESC
     desc "make public and tile users"
     task :create_publicuser => :environment do
       begin
-        ::Rails::Sequel.connection.run("CREATE USER #{CartoDB::PUBLIC_DB_USER}")
+        connection_params = ::Rails::Sequel.configuration.environment_for(Rails.env).merge(
+          :logger => logger,
+          'host' => self.database_host
+        ) {|key, o, n| n.nil? ? o : n}
+        conn = ::Sequel.connect(connection_params)
+        conn.run("CREATE USER #{CartoDB::PUBLIC_DB_USER}")
+        #::Rails::Sequel.connection.run("CREATE USER #{CartoDB::PUBLIC_DB_USER}")
       rescue
       end
       begin
-        ::Rails::Sequel.connection.run("CREATE USER #{CartoDB::TILE_DB_USER}")
+        connection_params = ::Rails::Sequel.configuration.environment_for(Rails.env).merge(
+          :logger => logger,
+          :host => self.database_host
+        ) {|key, o, n| n.nil? ? o : n}
+        conn = Rails::Sequel.connection(connection_params)
+        conn.run("CREATE USER #{CartoDB::TILE_DB_USER}")
+        #::Rails::Sequel.connection.run("CREATE USER #{CartoDB::TILE_DB_USER}")
       rescue
       end
     end

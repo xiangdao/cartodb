@@ -303,7 +303,8 @@ class DataImport < Sequel::Model
       .merge(
         user:     table_owner.database_username,
         password: table_owner.database_password,
-        database: table_owner.database_name
+        database: table_owner.database_name,
+        host:     table_owner.database_host
       )
   end #pg_options
 
