@@ -1,6 +1,14 @@
 Testing CartoDB
 ===============
 
+Easy way
+--------
+
+Just run "make check". 
+
+Detailed way
+------------
+
 CartoDB tests are based on [Ruby Spec](http://rspec.info/).
 The procedure to run them is as follows:
 
