@@ -18,6 +18,14 @@ SELECT
   round(st_x(the_geom_webmercator)) as mercator_x,
   round(st_y(the_geom_webmercator)) as mercator_y
 FROM t;
-
-
 DROP TABLE t;
+
+-- t1: table with existing srid-unconstrained (but type-constrained) the_geom
+CREATE TABLE t AS SELECT ST_SetSRID(ST_MakePoint(0,0),4326)::geometry(point) as the_geom;
+SELECT CDB_CartodbfyTable('t');
+SELECT f_table_schema,f_table_name,f_geometry_column,coord_dimension,srid,type
+  FROM geometry_columns
+  ORDER BY f_table_name,f_geometry_column;
+DROP TABLE t;
+
+

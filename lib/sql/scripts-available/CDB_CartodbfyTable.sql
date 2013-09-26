@@ -184,9 +184,7 @@ BEGIN
 
   -- We need the_geom and the_geom_webmercator
   FOR rec IN SELECT * FROM ( VALUES ('the_geom',4326), ('the_geom_webmercator',3857) ) t(cname,csrid) LOOP --{
-    << column_setup >>
-    LOOP --{
-      had_column := FALSE;
+    << column_setup >> LOOP --{
       BEGIN
         sql := 'ALTER TABLE ' || reloid::text || ' ADD ' || rec.cname
           || ' GEOMETRY(geometry,' || rec.csrid || ')';
@@ -199,70 +197,91 @@ BEGIN
       EXCEPTION
       WHEN duplicate_column THEN
         RAISE NOTICE 'Column % already exists', rec.cname;
-        had_column := TRUE;
       WHEN others THEN
         RAISE EXCEPTION 'Got % (%)', SQLERRM, SQLSTATE;
       END;
 
-      IF had_column THEN
+      << column_fixup >>
+      LOOP --{
 
         -- Check data type is a GEOMETRY
-        SELECT t.typname, t.oid, a.attnotnull FROM pg_type t, pg_attribute a
+        SELECT t.typname, t.oid, a.attnotnull,
+               postgis_typmod_srid(a.atttypmod) as srid,
+               postgis_typmod_type(a.atttypmod) as gtype
+         FROM pg_type t, pg_attribute a
          WHERE a.atttypid = t.oid AND a.attrelid = reloid AND NOT a.attisdropped
            AND a.attname = rec.cname
         INTO STRICT rec2;
+
         IF rec2.typname NOT IN ('geometry') THEN -- {
           RAISE NOTICE 'Existing % field is of invalid type % (need geometry), renaming', rec.cname, rec2.typname;
-        ELSE -- }{
-          -- add gist indices if not there already
-          IF NOT EXISTS ( SELECT ir.relname
-                          FROM pg_am am, pg_class ir,
-                               pg_class c, pg_index i,
-                               pg_attribute a
-                          WHERE c.oid  = reloid AND i.indrelid = c.oid
-                            AND a.attname = rec.cname
-                            AND i.indexrelid = ir.oid AND i.indnatts = 1
-                            AND i.indkey[0] = a.attnum AND a.attrelid = c.oid
-                            AND NOT a.attisdropped AND am.oid = ir.relam
-                            AND am.amname = 'gist' )
-          THEN
-            BEGIN
-              sql := 'CREATE INDEX ON ' || reloid::text || ' USING GIST ( ' || rec.cname || ')';
-              RAISE NOTICE 'Running %', sql;
-              EXECUTE sql;
-              EXIT column_setup;
-            EXCEPTION
-            WHEN others THEN
-              RAISE EXCEPTION 'Got % (%)', SQLERRM, SQLSTATE;
-            END;
-          END IF; -- }
-          EXIT column_setup;
+          EXIT column_fixup; -- cannot fix
         END IF; -- }
 
-        -- invalid column, need rename and re-create it
-        i := 0;
-        << rename_column >>
-        LOOP --{
-          new_name := '_' || rec.cname || i;
+        IF rec2.srid != rec.csrid THEN -- {
+            BEGIN
+              sql := 'ALTER TABLE ' || reloid::text || ' ALTER ' || rec.cname
+                || ' TYPE geometry(' || rec2.gtype || ',' || rec.csrid || ') USING ST_Transform('
+                || rec.cname || ',' || rec.csrid || ')';
+              RAISE NOTICE 'Running %', sql;
+              EXECUTE sql;
+            EXCEPTION
+            WHEN others THEN
+              RAISE NOTICE 'Could not enforce SRID % to column %: %, renaming', rec.csrid, rec.cname, SQLERRM;
+              EXIT column_fixup; -- cannot fix, will rename
+            END;
+        END IF; -- }
+
+        -- add gist indices if not there already
+        IF NOT EXISTS ( SELECT ir.relname
+                        FROM pg_am am, pg_class ir,
+                             pg_class c, pg_index i,
+                             pg_attribute a
+                        WHERE c.oid  = reloid AND i.indrelid = c.oid
+                          AND a.attname = rec.cname
+                          AND i.indexrelid = ir.oid AND i.indnatts = 1
+                          AND i.indkey[0] = a.attnum AND a.attrelid = c.oid
+                          AND NOT a.attisdropped AND am.oid = ir.relam
+                          AND am.amname = 'gist' )
+        THEN -- {
           BEGIN
-            sql := 'ALTER TABLE ' || reloid::text || ' RENAME COLUMN ' || rec.cname || ' TO ' || new_name;
+            sql := 'CREATE INDEX ON ' || reloid::text || ' USING GIST ( ' || rec.cname || ')';
             RAISE NOTICE 'Running %', sql;
             EXECUTE sql;
           EXCEPTION
-          WHEN duplicate_column THEN
-            i := i+1;
-            CONTINUE rename_column;
           WHEN others THEN
             RAISE EXCEPTION 'Got % (%)', SQLERRM, SQLSTATE;
           END;
-          EXIT rename_column;
-        END LOOP; --}
-        CONTINUE column_setup;
+        END IF; -- }
 
-      END IF;
-    END LOOP; -- }
+        -- if we reached this line, all went good
+        EXIT column_setup;
 
-  END LOOP; -- }
+      END LOOP; -- } column_fixup 
+
+      -- invalid column, need rename and re-create it
+      i := 0;
+      << rename_column >>
+      LOOP --{
+        new_name := '_' || rec.cname || i;
+        BEGIN
+          sql := 'ALTER TABLE ' || reloid::text || ' RENAME COLUMN ' || rec.cname || ' TO ' || new_name;
+          RAISE NOTICE 'Running %', sql;
+          EXECUTE sql;
+        EXCEPTION
+        WHEN duplicate_column THEN
+          i := i+1;
+          CONTINUE rename_column;
+        WHEN others THEN
+          RAISE EXCEPTION 'Got % (%)', SQLERRM, SQLSTATE;
+        END;
+        EXIT rename_column;
+      END LOOP; --}
+      CONTINUE column_setup;
+
+    END LOOP; -- } column_setup 
+
+  END LOOP; -- } on expected geometry columns
 
   -- Drop and re-create all triggers
 
