@@ -121,6 +121,10 @@ BEGIN
       RAISE EXCEPTION 'cartodb_id or created_at or updated_at are missing not-null constraint';
   END IF;
 
+  -- Cleanup
+  sql := 'DELETE FROM ' || tabname::text || ' WHERE cartodb_id = ' || id;
+  EXECUTE sql;
+
   RETURN label || ' cartodbfied fine';
 END;
 $$
@@ -134,6 +138,19 @@ DROP TABLE t;
 -- table with existing srid-unconstrained (but type-constrained) the_geom
 CREATE TABLE t AS SELECT ST_SetSRID(ST_MakePoint(0,0),4326)::geometry(point) as the_geom;
 SELECT CDB_CartodbfyTableCheck('t', 'srid-unconstrained the_geom');
+DROP TABLE t;
+
+-- table with mixed-srid the_geom values
+CREATE TABLE t AS SELECT ST_SetSRID(ST_MakePoint(-1,-1),4326) as the_geom
+UNION ALL SELECT ST_SetSRID(ST_MakePoint(0,0),3857);
+SELECT CDB_CartodbfyTableCheck('t', 'mixed-srid the_geom');
+SELECT 'extent',ST_Extent(the_geom) FROM t;
+DROP TABLE t;
+
+-- table with wrong srid-constrained the_geom values
+CREATE TABLE t AS SELECT 'SRID=3857;LINESTRING(222638.981586547 222684.208505545, 111319.490793274 111325.142866385)'::geometry(geometry,3857) as the_geom;
+SELECT CDB_CartodbfyTableCheck('t', 'wrong srid-constrained the_geom');
+SELECT 'extent',ST_Extent(the_geom) FROM t;
 DROP TABLE t;
 
 
