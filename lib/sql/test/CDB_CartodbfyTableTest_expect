@@ -1,13 +1,9 @@
 SET
-CREATE TABLE
-
-public|t|the_geom|2|4326|GEOMETRY
-public|t|the_geom_webmercator|2|3857|GEOMETRY
-INSERT 0 1
-t1|1|0|0|1|2|111319|222684
+CREATE FUNCTION
+SELECT 1
+single non-geometrical column cartodbfied fine
 DROP TABLE
 SELECT 1
-
-public|t|the_geom|2|4326|POINT
-public|t|the_geom_webmercator|2|3857|GEOMETRY
+srid-unconstrained the_geom cartodbfied fine
 DROP TABLE
+DROP FUNCTION
