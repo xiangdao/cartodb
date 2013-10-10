@@ -1,10 +1,12 @@
 #!/usr/bin/env ruby
 
 require 'pg'
+require 'redis'
 
 DBHOST = '127.0.0.1'
 DBUSER = 'postgres'
-DBNAME = 'cartodb_uuid'
+DBNAME = 'carto_db_development'
+REDIS_HOST = '127.0.0.1'
 ENVIRONMENT = 'development'
 
 @actions = ['schema', 'rollback', 'meta', 'clean', 'data']
@@ -42,8 +44,9 @@ tables = {
              :singular => 'data_import'
            },
            :layers => {
-             :related => ['layers_maps', 'layers_users', 'layers_user_tables'],
-             :singular => 'layer'
+             :related => ['layers_maps', 'layers_users', 'layers_user_tables', 'visualizations'],
+             :singular => 'layer',
+             :relation_for => {'visualizations' => 'active_layer'}
            },
            :layers_maps => {
              :related => [],
@@ -80,18 +83,100 @@ tables = {
            :user_tables => {
              :related => ['data_imports', 'layers_user_tables', 'tags'],
              :singular => 'table',
-             :relation_for => {:layers_user_tables => 'user_table'}
+             :relation_for => {'layers_user_tables' => 'user_table'}
            },
            :users => {
-             :related => ['user_tables', 'maps', 'layers_users', 'assets', 'api_keys', 'client_applications', 'oauth_tokens', 'tags'],
+             :related => ['user_tables', 'maps', 'layers_users', 'assets', 'api_keys', 'client_applications', 'oauth_tokens', 'tags', 'data_imports'],
              :singular => 'user'
            },
-           :visualizations => {
-             :related => ['overlays'],
-             :singular => 'visualization'
-           }
+           #:visualizations => {
+           #  :related => ['overlays'],
+           #  :singular => 'visualization'
+           #}
          }
 
+redis_keys = {
+              :map_style => {
+                :template => "map_style|USERDB|*",
+                :var_position => 1,
+                :separator => '|',
+                :db => 0,
+                :type => 'string'
+              },
+              :table => {
+                :template => "rails:USERDB:*",
+                :var_position => 1, 
+                :separator => ':',
+                :db => 0,
+                :type => 'hash',
+                :attributes => {
+                  :user_id => 'USERID'
+                }
+              },
+              :user => {
+                :template => "rails:users:USERNAME",
+                :no_clone => true,
+                :var_position => 2,
+                :separator => ':',
+                :db => 5,
+                :type => 'hash',
+                :attributes => {
+                  :database_name => 'USERDB',
+                  :id => 'USERID'
+                }
+              }
+            }
+
+def redis_replace_from_template(template, id, username)
+  if template.include?('USERDB')
+    user_database(id)
+  elsif template.include?('DBUSER')
+    database_username(id)
+  elsif template.include?('USERNAME')
+    username
+  elsif template.include?('USERID')
+    id
+  else
+    '' 
+  end
+end
+
+def redis_template_user_gsub(template, id, username)
+  replacement = redis_replace_from_template(template, id, username)
+  if template.include?('USERDB')
+    template.gsub('USERDB', replacement)
+  elsif template.include?('DBUSER')
+    template.gsub('DBUSER', replacement)
+  elsif template.include?('USERNAME')
+    template.gsub('USERNAME', replacement)
+  else
+    '' 
+  end
+end
+
+def copy_redis_keys(redis_keys, id, uuid, username)
+  redis = Redis.new(:host => REDIS_HOST)
+  redis_keys.each do |k,v|
+    redis.select(v[:db])
+    these_redis_keys = redis.keys(redis_template_user_gsub(v[:template], id, username))
+    these_redis_keys.each do |trd|
+        original_value = redis.dump(trd)
+        new_array = trd.split(v[:separator])
+        new_array[v[:var_position]] = redis_replace_from_template(v[:template], uuid, username)
+        new_key = new_array.join(v[:separator])
+      unless v[:no_clone]
+        redis.restore(new_key, 0, original_value)
+      end
+      if v[:type] == 'hash'
+        v[:attributes].each do |a,av|
+          redis.hset(new_key, a.to_s, redis_replace_from_template(av, uuid, username))
+        end
+      end
+    end
+  end
+  redis.quit
+end
+  
 def relation_column_name_for(tables, table, related)
   if tables[table][:related].include?(related) && tables[table][:relation_for] && tables[table][:relation_for][related]
     tables[table][:relation_for][related]
@@ -175,7 +260,7 @@ def migrate_meta(tables)
         tinfo[:related].each do |rtable|
           puts "Setting #{relation_column_name_for(tables, tname, rtable)}_uuid in #{rtable}"
           begin
-            @conn.exec("UPDATE #{rtable} SET #{relation_column_name_for(tables, tname, rtable)}_uuid=#{row['uuid']} WHERE #{relation_column_name_for(tables, tname, rtable)}_id=#{row['id']}")        
+            @conn.exec("UPDATE #{rtable} SET #{relation_column_name_for(tables, tname, rtable)}_uuid='#{row['uuid']}' WHERE #{relation_column_name_for(tables, tname, rtable)}_id=#{row['id']}")        
           rescue => e
             log('C', "Setting #{relation_column_name_for(tables, tname, rtable)}_uuid in #{rtable}", e.error.strip)
           end
@@ -185,17 +270,25 @@ def migrate_meta(tables)
   end
 end
 
-def migrate_data()
+
+def migrate_data(redis_keys)
   sconn = PGconn.connect( host: DBHOST, user: 'postgres', dbname: 'postgres' )
-  @conn.exec("SELECT id,uuid,database_name FROM users") do |result|
+  @conn.exec("SELECT id,uuid,database_name,username FROM users") do |result|
     result.each do |row|
       puts "Renaming pg user and db for id #{row['id']}"
       begin
-        sconn.exec("ALTER DATABASE #{row['database_name']} RENAME TO #{user_database(row['uuid'])}")
-        sconn.exec("ALTER ROLE #{database_username(row['id'])} RENAME TO #{database_username(row['uuid'])}")
-        @conn.exec("UPDATE users SET database_name=#{user_database(row['uuid'])} WHERE id=#{row['id']} AND uuid=#{row['uuid']}")
+        sconn.exec("ALTER DATABASE \"#{row['database_name']}\" RENAME TO \"#{user_database(row['uuid'])}\"")
+        sconn.exec("ALTER ROLE \"#{database_username(row['id'])}\" RENAME TO \"#{database_username(row['uuid'])}\"")
+        @conn.exec("UPDATE users SET database_name='#{user_database(row['uuid'])}' WHERE id=#{row['id']} AND uuid='#{row['uuid']}'")
       rescue => e
         log('C', "Renaming pg user and db for id #{row['id']}", e.error.strip)
+      end
+      puts "Copying redis keys with uuid for id #{row['id']}"
+      #begin
+        copy_redis_keys(redis_keys, row['id'], row['uuid'], row['username'])
+      #rescue => e
+      #  log('C', "Copying redis keys with uuid for id #{row['id']}", e.error.strip)
+      #end
     end
   end
 end
@@ -218,10 +311,32 @@ def clean_db(tables)
         log('C', "Renaming #{relation_column_name_for(tables, tname, rtable)}_uuid to #{relation_column_name_for(tables, tname, rtable)}_id in #{rtable}", e.error.strip)
       end
     end
+    # Drop old id column in every table
+    puts "Dropping old id from #{tname}"
+    begin
+      @conn.exec("ALTER TABLE #{tname} DROP IF EXISTS id")
+    rescue => e
+      log('C', "Dropping old id from #{rtable}", e.error.strip)
+    end
+    # Rename new uuid relation column to id
+    puts "Renaming uuid to id in #{tname}"
+    begin
+      @conn.exec("ALTER TABLE #{tname} RENAME uuid TO id")
+    rescue => e
+      log('C', "Renaming uuid to id in #{tname}", e.error.strip)
+    end
+    # Set new id as primary key
+    puts "Setting new id as primary key on #{tname}"
+    begin
+      @conn.exec("ALTER TABLE #{tname} ADD PRIMARY KEY (id)")
+    rescue => e
+      log('C', "Setting new id as primary key on #{tname}", e.error.strip)
+    end
   end
 end
 
 @conn = PGconn.connect( host: DBHOST, user: DBUSER, dbname: DBNAME )
+@conn.exec("CREATE EXTENSION IF NOT EXISTS \"uuid-ossp\"")
 
 if ACTION == 'schema'
   alter_schema(tables)
@@ -230,7 +345,12 @@ elsif ACTION == 'rollback'
 elsif ACTION == 'meta'
   migrate_meta(tables)
 elsif ACTION == 'data'
-  migrate_data()
+  migrate_data(redis_keys)
 elsif ACTION == 'clean'
   clean_db(tables)
 end
+
+puts ""
+puts "#############"
+puts "#{@logs.length} errors"
+puts "#############"
