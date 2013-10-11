@@ -60,7 +60,7 @@ module CartoDB
         db[:visualizations].with_sql(%Q{
           SELECT  *
           FROM    layers_user_tables, layers_maps, visualizations
-          WHERE   layers_user_tables.user_table_id = #{table.id}
+          WHERE   layers_user_tables.user_table_id = '#{table.id}'
           AND     layers_user_tables.layer_id = layers_maps.layer_id
           AND     layers_maps.map_id = visualizations.map_id
         })
