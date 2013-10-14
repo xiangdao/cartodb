@@ -14,4 +14,8 @@ SELECT 1
 wrong srid-constrained the_geom cartodbfied fine
 extent|BOX(1 1,2 2)
 DROP TABLE
+SELECT 1
+wrong srid-constrained the_geom_webmercator cartodbfied fine
+extent|BOX(1 1,2 2)
+DROP TABLE
 DROP FUNCTION

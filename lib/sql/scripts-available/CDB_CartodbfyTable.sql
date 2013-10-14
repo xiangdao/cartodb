@@ -37,6 +37,7 @@ DECLARE
   i INTEGER;
   new_name TEXT;
   quota_in_bytes INT8;
+  exists_geom_cols BOOLEAN[];
 BEGIN
 
   -- Ensure required fields exist
@@ -193,9 +194,11 @@ BEGIN
         sql := 'CREATE INDEX ON ' || reloid::text || ' USING GIST ( ' || rec.cname || ')';
         RAISE NOTICE 'Running %', sql;
         EXECUTE sql;
+        exists_geom_cols := array_append(exists_geom_cols, false);
         EXIT column_setup;
       EXCEPTION
       WHEN duplicate_column THEN
+        exists_geom_cols := array_append(exists_geom_cols, true);
         RAISE NOTICE 'Column % already exists', rec.cname;
       WHEN others THEN
         RAISE EXCEPTION 'Got % (%)', SQLERRM, SQLSTATE;
@@ -282,6 +285,14 @@ BEGIN
     END LOOP; -- } column_setup 
 
   END LOOP; -- } on expected geometry columns
+
+  -- Initialize the_geom with values from the_geom_webmercator
+  -- do this only if the_geom_webmercator was found (not created)
+  -- _and_ the_geom as NOT found.
+  IF exists_geom_cols[2] AND NOT exists_geom_cols[1] THEN
+    sql := 'UPDATE ' || reloid::text || ' SET the_geom = ST_Transform(the_geom_webmercator, 4326) ';
+    EXECUTE sql;
+  END IF;
 
   -- Drop and re-create all triggers
 

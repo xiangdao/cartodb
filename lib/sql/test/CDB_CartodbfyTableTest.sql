@@ -153,5 +153,12 @@ SELECT CDB_CartodbfyTableCheck('t', 'wrong srid-constrained the_geom');
 SELECT 'extent',ST_Extent(the_geom) FROM t;
 DROP TABLE t;
 
+-- table with wrong srid-constrained the_geom_webmercator values (and no the_geom!)
+CREATE TABLE t AS SELECT 'SRID=4326;LINESTRING(1 1,2 2)'::geometry(geometry,4326) as the_geom_webmercator;
+SELECT CDB_CartodbfyTableCheck('t', 'wrong srid-constrained the_geom_webmercator');
+-- expect the_geom to be populated from the_geom_webmercator
+SELECT 'extent',ST_Extent(ST_SnapToGrid(the_geom,0.1)) FROM t;
+DROP TABLE t;
+
 
 DROP FUNCTION CDB_CartodbfyTableCheck(regclass, text);
