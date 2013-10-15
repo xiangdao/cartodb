@@ -13,6 +13,7 @@ describe Map do
   end
 
   before(:each) do
+    Table.any_instance.stubs(:tile_request).returns true
     @table = Table.new
     @table.user_id = @user.id
     @table.save

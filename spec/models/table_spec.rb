@@ -42,6 +42,7 @@ describe Table do
   end
   before(:each) do
     CartoDB::Varnish.any_instance.stubs(:send_command).returns(true)
+    Table.any_instance.stubs(:tile_request).returns true
   end
 
   context "table setups" do

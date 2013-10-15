@@ -13,6 +13,7 @@ describe Layer do
     @table = Table.new
     @table.user_id = @user.id
     @table.save
+    Table.any_instance.stubs(:tile_request).returns true
   end
 
   context "setups" do

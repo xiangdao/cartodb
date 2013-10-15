@@ -16,6 +16,7 @@ describe User do
 
   before(:each) do
     CartoDB::Varnish.any_instance.stubs(:send_command).returns(true)
+    Table.any_instance.stubs(:tile_request).returns true
   end
 
   it "should set up a user after create" do
